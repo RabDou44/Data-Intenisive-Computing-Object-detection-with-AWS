@@ -16,8 +16,7 @@
 from PIL import Image
 from PIL import ImageDraw
 import os
-import detect
-import tflite_runtime.interpreter as tflite
+#import tflite_runtime.interpreter as tflite
 import platform
 import datetime
 import cv2
@@ -30,36 +29,40 @@ import random
 import re
 import tensorflow as tf
 import tensorflow_hub as hub
+from base64 import b64encode, b64decode
 
 
 app = Flask(__name__)
 
-default_module = "https://tfhub.dev/google/faster_rcnn/openimages_v4/inception_resnet_v2/1"
+default_module = "https://tfhub.dev/google/openimages_v4/ssd/mobilenet_v2/1"
 detector = hub.load(default_module).signatures['default']
 
-def detection_loop(filename_image):
+def detection_loop(images: list[np.ndarray]):
+  bbs = []
+  inf_time = 0
+  for img in images:
+    converted_img  = tf.image.convert_image_dtype(img, tf.float32)[tf.newaxis, ...]
 
-  def load_img(path):
-    img = tf.io.read_file(path)
-    img = tf.image.decode_jpeg(img, channels=3)
-    return img
+    start_time = time.time()
+    result = detector(converted_img)
+    inf_time += start_time - time.time()
+    result = {key:value.numpy() for key,value in result.items()}
 
-  img = load_img(filename_image)
-  converted_img  = tf.image.convert_image_dtype(img, tf.float32)[tf.newaxis, ...]
-
-  start_time = time.time()
-  result = detector(converted_img)
-  inf_time = start_time - time.time()
-
-  result = {key:value.numpy() for key,value in result.items()}
-
-  bounding_boxes = [{"score":s, "label":l, "bounding_box":bb} 
-                    for s,l,bb in zip(result["detection_scores"],
-                                      result["detection_class_entities"],
-                                      result["detection_boxes"])]
-  
-  return {"inference_time":inf_time, 
-          "bounding_boxes":bounding_boxes}
+    bounding_boxes = [{"scores":s, "labels":l, "boxes":bb} 
+                      for s,l,bb in zip(result["detection_scores"],
+                                        result["detection_class_entities"],
+                                        result["detection_boxes"])]
+    
+    bbs.append(bounding_boxes)
+  response = {
+    "status":200,
+    "bounding_boxes":bbs,
+    "inf_time":inf_time,
+    "avg_inf_time":inf_time / len(images) if len(images) > 0 else np.nan,
+    "upload_time":0,
+    "avg_upload_time":0
+  }
+  return response
 
   #TODO - make actual json response?
   """ this is from the 
@@ -89,7 +92,7 @@ def main():
   #below is an example
   images =[]
   for img in imgs:
-    images.append((np.array(Image.open(io.BytesIO(base64.b64decode(img))),dtype=np.float32)))
+    images.append((np.array(Image.open(io.BytesIO(b64decode(img))),dtype=np.float32)))
   
   
   return detection_loop(images)
