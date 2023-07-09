@@ -46,6 +46,10 @@ def detection_loop(images: list, request_made_time:float):
   inf_time = 0
   for img in images:
     converted_img  = tf.image.convert_image_dtype(img, tf.float32)[tf.newaxis, ...]
+    if len(converted_img.shape) < 4:
+      # for that one pure grayscale image that gets read in without an RGB channel axis
+      converted_img = tf.image.convert_image_dtype(img, tf.float32)[tf.newaxis,...,tf.newaxis]
+      converted_img = tf.image.grayscale_to_rgb(converted_img)
 
     start_time = time.time()
     result = detector(converted_img)
