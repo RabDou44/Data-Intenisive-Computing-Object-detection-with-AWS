@@ -37,30 +37,31 @@ app = Flask(__name__)
 default_module = "https://tfhub.dev/google/openimages_v4/ssd/mobilenet_v2/1"
 detector = hub.load(default_module).signatures['default']
 
-def detection_loop(images: list[np.ndarray]):
-  bbs = []
+def detection_loop(images: list, request_made_time:float):
+  
+  upload_time = time.time() - request_made_time 
+  scores = []
+  labels = []
+  boxes = []
   inf_time = 0
   for img in images:
     converted_img  = tf.image.convert_image_dtype(img, tf.float32)[tf.newaxis, ...]
 
     start_time = time.time()
     result = detector(converted_img)
-    inf_time += start_time - time.time()
+    inf_time += time.time() - start_time
     result = {key:value.numpy() for key,value in result.items()}
-
-    bounding_boxes = [{"scores":s, "labels":l, "boxes":bb} 
-                      for s,l,bb in zip(result["detection_scores"],
-                                        result["detection_class_entities"],
-                                        result["detection_boxes"])]
+    boxes.append(result["detection_boxes"].tolist())
     
-    bbs.append(bounding_boxes)
   response = {
     "status":200,
-    "bounding_boxes":bbs,
+    "boxes":boxes,
     "inf_time":inf_time,
     "avg_inf_time":inf_time / len(images) if len(images) > 0 else np.nan,
-    "upload_time":0,
-    "avg_upload_time":0
+    "upload_time":upload_time,
+    "avg_upload_time":(upload_time) / len(images) if len(images) > 0 else np.nan,
+    "total_time":inf_time + upload_time,
+    "avg_total_time":(inf_time + upload_time) / len(images) if len(images) > 0 else np.nan
   }
   return response
 
@@ -87,15 +88,17 @@ def main():
   data=  request.get_json(force = True)
   #get the array of images from the json body
   imgs = data['images']
- 
+  reqtime = data["time"]
   #TODO prepare images for object detection 
   #below is an example
+  if isinstance (imgs, str):
+    imgs = [imgs]
   images =[]
   for img in imgs:
-    images.append((np.array(Image.open(io.BytesIO(b64decode(img))),dtype=np.float32)))
+    images.append((np.array(Image.open(io.BytesIO(b64decode(img.encode("utf-8")))),dtype=np.float32)))
   
   
-  return detection_loop(images)
+  return detection_loop(images, reqtime)
   
 # status_code = Response(status = 200)
 #  return status_code
